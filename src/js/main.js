@@ -1444,19 +1444,38 @@ async function loadSkills(container) {
         grouped[cat].push(s);
       });
 
+      // Build location badge HTML
+      function locationBadge(loc) {
+        if (!loc || loc === 'unknown') return '';
+        const parts = loc.split(',').map(l => {
+          if (l === 'hermes') return '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#7c3aed;color:#fff;margin-right:4px;">hermes</span>';
+          if (l === 'claude') return '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#059669;color:#fff;margin-right:4px;">claude</span>';
+          return `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#6b7280;color:#fff;margin-right:4px;">${l}</span>`;
+        });
+        return parts.join('');
+      }
+
       listEl.innerHTML = Object.entries(grouped).map(([cat, items]) => `
         <div style="margin-bottom:16px;">
           <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--fg-muted);margin-bottom:8px;">${cat}</div>
           <div class="card-grid">
-            ${items.map(s => `
+            ${items.map(s => {
+              const desc = s.description
+                ? `<div style="margin-top:6px;font-size:12px;color:var(--fg-secondary);line-height:1.4;">${s.description}</div>`
+                : `<div style="margin-top:6px;font-size:12px;color:var(--fg-muted);font-style:italic;line-height:1.4;">No description available</div>`;
+              return `
               <div class="card">
-                <div class="card-title">${s.name || 'Unknown'}</div>
+                <div style="display:flex;align-items:start;justify-content:space-between;gap:8px;">
+                  <div class="card-title">${s.name || 'Unknown'}</div>
+                  ${locationBadge(s.location)}
+                </div>
+                ${desc}
                 <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
                   ${s.source ? `<span class="badge" style="font-size:10px;">${s.source}</span>` : ''}
                   ${s.trust ? `<span class="badge" style="font-size:10px;opacity:0.7;">${s.trust}</span>` : ''}
                 </div>
               </div>
-            `).join('')}
+            `}).join('')}
           </div>
         </div>
       `).join('');

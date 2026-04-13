@@ -1894,6 +1894,107 @@ app.get('/api/auth/providers', requireRole('admin'), async (req, res) => {
 });
 
 // Skills list
+// Read skill info from SKILL.md frontmatter using js-yaml
+function getSkillInfo(name, category) {
+  // Determine which skill stores have this skill
+  const hermesBase = path.join(CONTROL_HOME, 'skills');
+  const claudeBase = path.join(os.homedir(), '.claude', 'skills');
+
+  // Search inside a category directory for subdirectories (mlops has mlops/training/, mlops/inference/, etc.)
+  function searchSubdirs(catDir) {
+    try {
+      for (const entry of fs.readdirSync(catDir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          const p = path.join(catDir, entry.name, name, 'SKILL.md');
+          if (fs.existsSync(p)) return p;
+          // Recurse one more level (e.g., mlops/training/axolotl/SKILL.md)
+          try {
+            for (const sub of fs.readdirSync(path.join(catDir, entry.name), { withFileTypes: true })) {
+              if (sub.isDirectory()) {
+                const p2 = path.join(catDir, entry.name, sub.name, name, 'SKILL.md');
+                if (fs.existsSync(p2)) return p2;
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  const candidates = [];
+  if (category && category !== 'uncategorized') {
+    // Flat hermes + claude
+    candidates.push(path.join(hermesBase, name, 'SKILL.md'));
+    candidates.push(path.join(claudeBase, name, 'SKILL.md'));
+    // Subdir search for hermes categories (mlops has subdirs)
+    const hermesCatDir = path.join(hermesBase, category);
+    const subResult = searchSubdirs(hermesCatDir);
+    if (subResult) candidates.push(subResult);
+    // Direct categorized paths
+    candidates.push(path.join(hermesBase, category, name, 'SKILL.md'));
+    candidates.push(path.join(claudeBase, category, name, 'SKILL.md'));
+  } else {
+    candidates.push(path.join(hermesBase, name, 'SKILL.md'));
+    candidates.push(path.join(claudeBase, name, 'SKILL.md'));
+  }
+
+  let location = [];
+  let skillPath = null;
+  let frontmatter = {};
+
+  for (const p of candidates) {
+    if (!p || typeof p !== 'string') continue;
+    try {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf8');
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
+        if (fmMatch) {
+          try {
+            frontmatter = yaml.load(fmMatch[1]) || {};
+          } catch {}
+        }
+        if (p.startsWith(hermesBase) && !location.includes('hermes')) {
+          location.push('hermes');
+        } else if (p.startsWith(claudeBase) && !location.includes('claude')) {
+          location.push('claude');
+        }
+        if (!skillPath) skillPath = p;
+      }
+    } catch {}
+  }
+
+  const rawDesc = frontmatter.description;
+  let description = '';
+  if (rawDesc && typeof rawDesc === 'string') {
+    description = rawDesc.split('\n')[0].trim().slice(0, 120);
+    const periodIdx = description.indexOf('. ');
+    if (periodIdx > 5 && periodIdx < 115) {
+      description = description.slice(0, periodIdx + 1);
+    }
+  }
+
+  // Fallback: first meaningful line from body
+  if (!description && skillPath) {
+    try {
+      const content = fs.readFileSync(skillPath, 'utf8');
+      const bodyStart = content.indexOf('\n---\n', 4);
+      const body = bodyStart !== -1 ? content.slice(bodyStart + 5) : '';
+      for (const line of body.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed === '---' || trimmed.startsWith('#') || trimmed.startsWith('```') || trimmed.startsWith('|')) continue;
+        description = trimmed.slice(0, 120);
+        break;
+      }
+    } catch {}
+  }
+
+  return {
+    description,
+    location: location.length > 0 ? location.join(',') : 'unknown',
+  };
+}
+
 app.get('/api/skills', requireAuth, async (req, res) => {
   try {
     const raw = await shell('hermes skills list 2>&1');
@@ -1905,11 +2006,16 @@ app.get('/api/skills', requireAuth, async (req, res) => {
       // Split by │ and clean each cell
       const cells = line.split('│').map(c => c.trim()).filter((c, i) => i > 0);
       if (cells.length >= 2 && cells[0]) {
+        const name = cells[0] || '';
+        const category = cells[1] || 'uncategorized';
+        const { description, location } = getSkillInfo(name, category);
         skills.push({
-          name: cells[0] || '',
-          category: cells[1] || 'uncategorized',
+          name,
+          category,
           source: cells[2] || '',
           trust: cells[3] || '',
+          description,
+          location,
           enabled: true,
         });
       }
